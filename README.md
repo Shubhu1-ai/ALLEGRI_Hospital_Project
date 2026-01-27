@@ -1,3 +1,46 @@
+# Pi2_Project
+
+Short description
+
+This repository contains a frontend (Vite/React/TypeScript) and Python backend related to the Pi2_Project web app. Files of interest include `package.json`, `main.py`, and `server.py`.
+
+Prerequisites
+- Node.js (16+)
+- Python 3.10+ (if you run the Python backend)
+
+Quick start (frontend)
+1. Install dependencies:
+
+```bash
+npm install
+```
+
+2. Start the dev server:
+
+```bash
+npm run dev
+```
+
+Quick start (backend)
+1. Install Python deps (if a requirements file exists):
+
+```bash
+python -m pip install -r requirements.txt
+```
+
+2. Run the backend (example):
+
+```bash
+python server.py
+```
+
+Notes
+- If any dataset or model files are large (e.g. `.pth` files), consider using Git LFS for them.
+- Update this README with project-specific run instructions and environment variables as needed.
+
+Repository
+
+https://github.com/Shubhu1-ai/Pi2_Project
 # ALLEGRI Hospital Portal - Setup & Deployment Guide
 
 This application is a specialized medical interface designed for the ALLEGRI Hospital unit. It allows technicians to capture samples via camera, perform cropping/refining, and interface with a Raspberry Pi analysis cluster for bacterial identification.
