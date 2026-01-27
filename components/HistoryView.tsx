@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { ArrowLeft, Search, Microscope, Calendar, Trash2, CheckCircle, Clock, AlertCircle } from 'lucide-react';
+import { ArrowLeft, Search, Microscope, Calendar, Trash2, CheckCircle, Clock, AlertCircle, Plus, Download } from 'lucide-react';
 import { AnalysisResult } from '../types';
 
 interface HistoryViewProps {
@@ -13,6 +13,7 @@ const HistoryView: React.FC<HistoryViewProps> = ({ results, onBack, onClearHisto
   const [filter, setFilter] = useState<'all' | 'completed' | 'pending' | 'failed'>('all');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
+  const [correctedIds, setCorrectedIds] = useState<Set<string>>(new Set());
 
   const filteredResults = useMemo(() => {
     return results.filter((result) => {
@@ -105,6 +106,28 @@ const HistoryView: React.FC<HistoryViewProps> = ({ results, onBack, onClearHisto
   };
 
   const isDeletingSomething = deletingIds.size > 0;
+
+  const toggleCorrection = (id: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setCorrectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const downloadImage = (dataUrl: string, filename?: string) => {
+    try {
+      const a = document.createElement('a');
+      a.href = dataUrl;
+      a.download = filename || 'analysis.jpg';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch (err) {
+      console.error('Download failed', err);
+    }
+  };
 
   return (
     <div className="max-w-5xl mx-auto p-4 animate-in fade-in duration-300 mb-10">
@@ -213,6 +236,14 @@ const HistoryView: React.FC<HistoryViewProps> = ({ results, onBack, onClearHisto
 
                 <div className="w-2/5 bg-slate-100 relative h-full">
                   <img src={result.imageUrl} alt="Bacteria Sample" className="absolute inset-0 w-full h-full object-cover transition-transform group-hover:scale-110 duration-700" />
+                  <div className="absolute top-3 left-3 flex gap-2 z-20">
+                    <button onClick={(e) => toggleCorrection(result.id, e)} title="Mark/Unmark Correction" className={`p-2 rounded-lg text-white ${correctedIds.has(result.id) ? 'bg-indigo-600' : 'bg-indigo-500/20 hover:bg-indigo-500 text-indigo-50'}`}>
+                      <Plus size={14} />
+                    </button>
+                    <button onClick={() => downloadImage(result.imageUrl, `analysis-${result.id}.jpg`)} title="Download Image" className="p-2 rounded-lg bg-emerald-500/20 hover:bg-emerald-500 text-white">
+                      <Download size={14} />
+                    </button>
+                  </div>
                 </div>
                 
                 <div className="w-3/5 p-5 pl-6 flex flex-col justify-between">

@@ -1,5 +1,5 @@
 import React, { useRef, useState, useCallback, useEffect } from 'react';
-import { Camera, RefreshCw, AlertTriangle, ArrowLeft, Zap, Images, CheckCircle, X, Trash2, Maximize2, Crop } from 'lucide-react';
+import { Camera, RefreshCw, AlertTriangle, ArrowLeft, Zap, Images, CheckCircle, X, Trash2, Maximize2, Crop, Plus, Download } from 'lucide-react';
 import { analyzeImageWithPi } from '../services/piService';
 import { AnalysisResult } from '../types';
 
@@ -12,6 +12,11 @@ interface CapturedImage {
   id: string;
   url: string;
   selected: boolean;
+}
+
+interface ViewerTarget {
+  id: string;
+  url: string;
 }
 
 // Simple crop modal component
@@ -138,6 +143,9 @@ const CameraView: React.FC<CameraViewProps> = ({ onBack, onAnalysisComplete }) =
   const [error, setError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'camera' | 'review'>('camera');
   const [cropTarget, setCropTarget] = useState<CapturedImage | null>(null);
+  const [isMobile, setIsMobile] = useState<boolean>(false);
+  const [viewerTarget, setViewerTarget] = useState<ViewerTarget | null>(null);
+  const [correctingIds, setCorrectingIds] = useState<Set<string>>(new Set());
 
   const startCamera = async () => {
     try {
@@ -171,6 +179,13 @@ const CameraView: React.FC<CameraViewProps> = ({ onBack, onAnalysisComplete }) =
     return () => stopCamera();
   }, [viewMode]);
 
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth <= 768);
+    onResize();
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
   const capturePhoto = useCallback(() => {
     if (videoRef.current && canvasRef.current) {
       const video = videoRef.current;
@@ -193,6 +208,33 @@ const CameraView: React.FC<CameraViewProps> = ({ onBack, onAnalysisComplete }) =
     setCapturedImages(prev => prev.map(img => 
       img.id === id ? { ...img, selected: !img.selected } : img
     ));
+  };
+
+  const openViewer = (img: CapturedImage) => {
+    setViewerTarget({ id: img.id, url: img.url });
+  };
+
+  const closeViewer = () => setViewerTarget(null);
+
+  const toggleCorrection = (id: string) => {
+    setCorrectingIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const downloadImage = (dataUrl: string, filename?: string) => {
+    try {
+      const a = document.createElement('a');
+      a.href = dataUrl;
+      a.download = filename || 'image.jpg';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch (err) {
+      console.error('Download failed', err);
+    }
   };
 
   const deleteImage = (id: string, e?: React.MouseEvent) => {
@@ -381,6 +423,25 @@ const CameraView: React.FC<CameraViewProps> = ({ onBack, onAnalysisComplete }) =
          />
        )}
 
+       {viewerTarget && (
+         <div className="fixed inset-0 z-[250] bg-black/90 flex items-center justify-center p-4">
+           <div className="w-full max-w-3xl bg-black rounded-lg overflow-hidden">
+             <div className="p-3 flex justify-between items-center">
+               <div className="text-white font-bold">Sample Viewer</div>
+               <div className="flex gap-2">
+                 <button onClick={() => downloadImage(viewerTarget.url, `sample-${viewerTarget.id}.jpg`)} className="text-white p-2 hover:text-emerald-400">
+                   <Download />
+                 </button>
+                 <button onClick={() => { closeViewer(); }} className="text-white p-2 hover:text-slate-300">Close</button>
+               </div>
+             </div>
+             <div className="p-4 flex items-center justify-center">
+               <img src={viewerTarget.url} alt="viewer" className="max-h-[80vh] max-w-full object-contain" />
+             </div>
+           </div>
+         </div>
+       )}
+
        <div className="flex items-center justify-between mb-8">
           <button onClick={() => setViewMode('camera')} className="flex items-center text-slate-500 hover:text-slate-800 font-bold text-sm transition-colors group">
              <ArrowLeft size={18} className="mr-2 group-hover:-translate-x-1 transition-transform" />
@@ -460,20 +521,36 @@ const CameraView: React.FC<CameraViewProps> = ({ onBack, onAnalysisComplete }) =
 
                     <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-3 gap-2">
                        <div className="flex justify-between items-center w-full">
-                         <button 
-                           onClick={(e) => openCropModal(img, e)}
-                           className="bg-emerald-500/20 hover:bg-emerald-500 text-white p-2 rounded-xl backdrop-blur-md transition-all border border-emerald-400/30"
-                           title="Crop Image"
-                         >
-                           <Crop size={18} />
-                         </button>
-                         <button 
-                           onClick={(e) => deleteImage(img.id, e)}
-                           className="bg-red-500/20 hover:bg-red-500 text-white p-2 rounded-xl backdrop-blur-md transition-all border border-red-400/30"
-                           title="Throw into Garbage"
-                         >
-                           <Trash2 size={18} />
-                         </button>
+                         <div className="flex gap-2">
+                           <button 
+                             onClick={(e) => openCropModal(img, e)}
+                             className="bg-emerald-500/20 hover:bg-emerald-500 text-white p-2 rounded-xl backdrop-blur-md transition-all border border-emerald-400/30"
+                             title="Crop Image"
+                           >
+                             <Crop size={18} />
+                           </button>
+                           <button 
+                             onClick={(e) => toggleCorrection(img.id)}
+                             className={`bg-indigo-500/10 hover:bg-indigo-500 text-white p-2 rounded-xl backdrop-blur-md transition-all border ${correctingIds.has(img.id) ? 'border-indigo-400 bg-indigo-500 text-white' : 'border-indigo-200'}`}
+                             title="Toggle Correction"
+                           >
+                             <Plus size={18} />
+                           </button>
+                           <button 
+                             onClick={() => downloadImage(img.url, `sample-${img.id}.jpg`)}
+                             className="bg-emerald-500/10 hover:bg-emerald-500 text-white p-2 rounded-xl backdrop-blur-md transition-all border border-emerald-300"
+                             title="Download Image"
+                           >
+                             <Download size={18} />
+                           </button>
+                           <button 
+                             onClick={(e) => deleteImage(img.id, e)}
+                             className="bg-red-500/20 hover:bg-red-500 text-white p-2 rounded-xl backdrop-blur-md transition-all border border-red-400/30"
+                             title="Throw into Garbage"
+                           >
+                             <Trash2 size={18} />
+                           </button>
+                         </div>
                        </div>
                     </div>
                  </div>
