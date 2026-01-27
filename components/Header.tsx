@@ -1,5 +1,5 @@
 import React from 'react';
-import { Activity, LogOut, User } from 'lucide-react';
+import { Activity, User } from 'lucide-react';
 import { UserProfile } from '../types';
 
 interface HeaderProps {
