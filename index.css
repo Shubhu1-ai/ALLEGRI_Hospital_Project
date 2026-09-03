@@ -1,0 +1,38 @@
+:root {
+  --hospital-surface: #f8fafc;
+  --hospital-card: #ffffff;
+  --hospital-navy: #0f172a;
+  --hospital-cyan: #0891b2;
+  --hospital-success: #059669;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--hospital-surface);
+  color: var(--hospital-navy);
+  font-family: 'Manrope', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.animate-modal-slide {
+  animation: modal-slide 260ms ease-out;
+}
+
+@keyframes modal-slide {
+  from {
+    opacity: 0;
+    transform: translateY(20px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}

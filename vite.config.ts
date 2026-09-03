@@ -1,21 +1,18 @@
-import path from 'path';
-import { defineConfig, loadEnv, UserConfig } from 'vite'; // Ajout de UserConfig
+﻿import path from 'path';
+import { defineConfig, loadEnv, UserConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-import basicSsl from '@vitejs/plugin-basic-ssl';
 
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
     
-    // On définit la configuration dans une variable typée pour aider TypeScript
+    // Define typed config to help TypeScript inference
     const config: UserConfig = {
       server: {
-        port: 3000,
+        port: 5173,
         host: '0.0.0.0',
-        https: true,
       },
       plugins: [
-        react(), 
-        basicSsl()
+        react()
       ],
       define: {
         'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),

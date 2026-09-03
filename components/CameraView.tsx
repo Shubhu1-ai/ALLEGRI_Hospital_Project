@@ -1,586 +1,637 @@
-import React, { useRef, useState, useCallback, useEffect } from 'react';
-import { Camera, RefreshCw, AlertTriangle, ArrowLeft, Zap, Images, CheckCircle, X, Trash2, Maximize2, Crop, Plus, Download } from 'lucide-react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
+import {
+  ArrowLeft,
+  ArrowRight,
+  CheckCircle2,
+  FlaskConical,
+  Images,
+  LoaderCircle,
+  Microscope,
+  Trash2,
+  Upload,
+  X,
+  ZoomIn,
+  ZoomOut,
+} from 'lucide-react';
 import { analyzeImageWithPi } from '../services/piService';
+import { PI_CAMERA_CAPTURE_URL, PI_CAMERA_STREAM_URL } from '../services/piConfig';
 import { AnalysisResult } from '../types';
+import { generateNextSampleName } from '../utils/sampleNaming';
 
 interface CameraViewProps {
   onBack: () => void;
   onAnalysisComplete: (results: AnalysisResult[]) => void;
+  existingSampleNames: string[];
 }
 
-interface CapturedImage {
+type SourceMode = 'pi' | 'gallery';
+type Step = 'capture' | 'review';
+
+interface BatchImage {
   id: string;
+  name: string;
   url: string;
+  source: SourceMode;
   selected: boolean;
+  file?: File;
+  rawCaptureDataUrl?: string;
+  originalImageUrl?: string;
 }
 
-interface ViewerTarget {
-  id: string;
+interface LightboxItem {
   url: string;
+  name: string;
 }
 
-// Simple crop modal component
-interface CropModalProps {
-  image: CapturedImage;
-  onConfirm: (id: string, newUrl: string) => void;
-  onCancel: () => void;
-}
-
-const CropModal: React.FC<CropModalProps> = ({ image, onConfirm, onCancel }) => {
-  const [startPos, setStartPos] = useState({ x: 0, y: 0 });
-  const [currentPos, setCurrentPos] = useState({ x: 0, y: 0 });
-  const [isDrawing, setIsDrawing] = useState(false);
-  const imgRef = useRef<HTMLImageElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  const handleMouseDown = (e: React.MouseEvent) => {
-    if (!containerRef.current) return;
-    const rect = containerRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    setStartPos({ x, y });
-    setCurrentPos({ x, y });
-    setIsDrawing(true);
-  };
-
-  const handleMouseMove = (e: React.MouseEvent) => {
-    if (!isDrawing || !containerRef.current) return;
-    const rect = containerRef.current.getBoundingClientRect();
-    const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
-    const y = Math.max(0, Math.min(e.clientY - rect.top, rect.height));
-    setCurrentPos({ x, y });
-  };
-
-  const handleMouseUp = () => {
-    setIsDrawing(false);
-  };
-
-  const handleConfirm = () => {
-    if (!imgRef.current) return;
-    const naturalWidth = imgRef.current.naturalWidth;
-    const clientWidth = imgRef.current.width;
-    const scale = naturalWidth / clientWidth;
-
-    const x = Math.min(startPos.x, currentPos.x) * scale;
-    const y = Math.min(startPos.y, currentPos.y) * scale;
-    const w = Math.abs(currentPos.x - startPos.x) * scale;
-    const h = Math.abs(currentPos.y - startPos.y) * scale;
-
-    if (w < 50 || h < 50) {
-      alert("Selection too small. Please select a larger area.");
-      return;
-    }
-
-    const canvas = document.createElement('canvas');
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext('2d');
-    if (ctx) {
-      ctx.drawImage(imgRef.current, x, y, w, h, 0, 0, w, h);
-      onConfirm(image.id, canvas.toDataURL('image/jpeg'));
-    }
-  };
-
-  const selectionStyle = {
-    left: Math.min(startPos.x, currentPos.x),
-    top: Math.min(startPos.y, currentPos.y),
-    width: Math.abs(currentPos.x - startPos.x),
-    height: Math.abs(currentPos.y - startPos.y),
-  };
-
-  return (
-    <div className="fixed inset-0 z-[100] bg-black flex flex-col items-center justify-center p-4">
-      <div className="w-full max-w-lg mb-4 flex justify-between items-center text-white">
-        <h3 className="font-bold text-xl">Manual Crop</h3>
-        <p className="text-sm text-slate-400">Select bacteria sample area</p>
-      </div>
-      
-      <div 
-        ref={containerRef}
-        className="relative bg-black border border-slate-800 cursor-crosshair select-none touch-none shadow-2xl rounded-lg overflow-hidden"
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
-      >
-        <img 
-          ref={imgRef}
-          src={image.url} 
-          alt="To crop" 
-          className="max-h-[60vh] max-w-full object-contain pointer-events-none"
-        />
-        <div 
-          className="absolute border-2 border-emerald-400 bg-emerald-400/10 shadow-[0_0_15px_rgba(52,211,153,0.3)]"
-          style={{ ...selectionStyle, pointerEvents: 'none' }}
-        />
-      </div>
-
-      <div className="mt-8 flex gap-4 w-full max-w-lg">
-        <button 
-          onClick={onCancel}
-          className="flex-1 py-4 bg-slate-800 text-white rounded-2xl font-bold hover:bg-slate-700 transition-colors border border-slate-700"
-        >
-          Cancel
-        </button>
-        <button 
-          onClick={handleConfirm}
-          className="flex-1 py-4 bg-emerald-600 text-white rounded-2xl font-bold hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-900/20 active:scale-95"
-        >
-          Confirm Crop
-        </button>
-      </div>
-    </div>
-  );
+const createId = (): string => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 };
 
-const CameraView: React.FC<CameraViewProps> = ({ onBack, onAnalysisComplete }) => {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [stream, setStream] = useState<MediaStream | null>(null);
-  const [capturedImages, setCapturedImages] = useState<CapturedImage[]>([]);
+const blobToDataUrl = (blob: Blob): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') { resolve(reader.result); return; }
+      reject(new Error('Failed to decode captured image.'));
+    };
+    reader.onerror = () => reject(new Error('Failed to read captured image.'));
+    reader.readAsDataURL(blob);
+  });
+
+const fileToDataUrl = (file: File): Promise<string> => blobToDataUrl(file);
+
+const fetchImageUrlToDataUrl = async (imageUrl: string): Promise<string> => {
+  const response = await fetch(imageUrl);
+  if (!response.ok) throw new Error(`Failed to load original image (${response.status}).`);
+  return blobToDataUrl(await response.blob());
+};
+
+const resolveAnalysisPayload = async (item: BatchImage): Promise<string> => {
+  if (item.file) return fileToDataUrl(item.file);
+  if (typeof item.originalImageUrl === 'string' && item.originalImageUrl.trim().length > 0) {
+    return fetchImageUrlToDataUrl(item.originalImageUrl);
+  }
+  if (typeof item.rawCaptureDataUrl === 'string' && item.rawCaptureDataUrl.trim().length > 0) {
+    return item.rawCaptureDataUrl;
+  }
+  throw new Error(`No raw image source is available for ${item.name}.`);
+};
+
+const CameraView: React.FC<CameraViewProps> = ({ onBack, onAnalysisComplete, existingSampleNames }) => {
+  const [step, setStep] = useState<Step>('capture');
+  const [sourceMode, setSourceMode] = useState<SourceMode>('pi');
+  const [batchImages, setBatchImages] = useState<BatchImage[]>([]);
   const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
+  const [enteringIds, setEnteringIds] = useState<Set<string>>(new Set());
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<'camera' | 'review'>('camera');
-  const [cropTarget, setCropTarget] = useState<CapturedImage | null>(null);
-  const [isMobile, setIsMobile] = useState<boolean>(false);
-  const [viewerTarget, setViewerTarget] = useState<ViewerTarget | null>(null);
-  const [correctingIds, setCorrectingIds] = useState<Set<string>>(new Set());
+  const [piStreamError, setPiStreamError] = useState(false);
 
-  const startCamera = async () => {
-    try {
-      const mediaStream = await navigator.mediaDevices.getUserMedia({ 
-        video: { facingMode: 'environment' } 
-      });
-      setStream(mediaStream);
-      if (videoRef.current) {
-        videoRef.current.srcObject = mediaStream;
-      }
-      setError(null);
-    } catch (err) {
-      setError("Unable to access camera. Please check permissions.");
-      console.error(err);
-    }
+  // Lightbox
+  const [lightboxItem, setLightboxItem] = useState<LightboxItem | null>(null);
+  const [lightboxZoom, setLightboxZoom] = useState(1);
+
+  const galleryInputRef = useRef<HTMLInputElement | null>(null);
+
+  const selectedCount = useMemo(() => batchImages.filter((item) => item.selected).length, [batchImages]);
+
+  // ─── Lightbox helpers ────────────────────────────────────────────────────
+
+  const openLightbox = (item: LightboxItem) => {
+    setLightboxItem(item);
+    setLightboxZoom(1);
   };
 
-  const stopCamera = () => {
-    if (stream) {
-      stream.getTracks().forEach(track => track.stop());
-      setStream(null);
-    }
+  const closeLightbox = () => {
+    setLightboxItem(null);
+    setLightboxZoom(1);
   };
 
-  useEffect(() => {
-    if (viewMode === 'camera') {
-      startCamera();
-    } else {
-      stopCamera();
-    }
-    return () => stopCamera();
-  }, [viewMode]);
+  const zoomIn = () => setLightboxZoom((z) => Number(Math.min(4, z + 0.25).toFixed(2)));
+  const zoomOut = () => setLightboxZoom((z) => Number(Math.max(1, z - 0.25).toFixed(2)));
 
-  useEffect(() => {
-    const onResize = () => setIsMobile(window.innerWidth <= 768);
-    onResize();
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, []);
+  // ─── Batch image helpers ─────────────────────────────────────────────────
 
-  const capturePhoto = useCallback(() => {
-    if (videoRef.current && canvasRef.current) {
-      const video = videoRef.current;
-      const canvas = canvasRef.current;
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-        setCapturedImages(prev => [
-          ...prev, 
-          { id: Date.now().toString() + Math.random().toString(), url: dataUrl, selected: true }
-        ]);
-      }
-    }
-  }, []);
-
-  const toggleImageSelection = (id: string) => {
-    setCapturedImages(prev => prev.map(img => 
-      img.id === id ? { ...img, selected: !img.selected } : img
-    ));
-  };
-
-  const openViewer = (img: CapturedImage) => {
-    setViewerTarget({ id: img.id, url: img.url });
-  };
-
-  const closeViewer = () => setViewerTarget(null);
-
-  const toggleCorrection = (id: string) => {
-    setCorrectingIds(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
+  const addBatchImage = useCallback((batchImage: Omit<BatchImage, 'id' | 'name' | 'selected'>, preferredName?: string) => {
+    const id = createId();
+    setEnteringIds((prev) => new Set(prev).add(id));
+    setBatchImages((prev) => {
+      const globalNames = [...existingSampleNames, ...prev.map((item) => item.name)];
+      const nextName = preferredName ?? generateNextSampleName(globalNames);
+      return [...prev, { ...batchImage, id, name: nextName, selected: true }];
     });
+    window.setTimeout(() => {
+      setEnteringIds((prev) => { const next = new Set(prev); next.delete(id); return next; });
+    }, 40);
+  }, [existingSampleNames]);
+
+  const deleteImageWithAnimation = (id: string) => {
+    setDeletingIds((prev) => new Set(prev).add(id));
+    window.setTimeout(() => {
+      setBatchImages((prev) => prev.filter((item) => item.id !== id));
+      setDeletingIds((prev) => { const next = new Set(prev); next.delete(id); return next; });
+    }, 260);
   };
 
-  const downloadImage = (dataUrl: string, filename?: string) => {
+  const toggleSelection = (id: string) => {
+    setBatchImages((prev) => prev.map((item) => item.id === id ? { ...item, selected: !item.selected } : item));
+  };
+
+  const setAllSelections = (selected: boolean) => {
+    setBatchImages((prev) => prev.map((item) => ({ ...item, selected })));
+  };
+
+  // ─── Pi capture / gallery ────────────────────────────────────────────────
+
+  const captureFromPiStream = async () => {
     try {
-      const a = document.createElement('a');
-      a.href = dataUrl;
-      a.download = filename || 'image.jpg';
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-    } catch (err) {
-      console.error('Download failed', err);
+      const response = await fetch(PI_CAMERA_CAPTURE_URL, { method: 'POST' });
+      if (!response.ok) {
+        let reason = `Pi capture request failed with HTTP ${response.status}.`;
+        try {
+          const payload = (await response.json()) as { message?: string; detail?: string };
+          reason = payload.message ?? payload.detail ?? reason;
+        } catch { /* keep HTTP fallback */ }
+        throw new Error(reason);
+      }
+      const frameBlob: Blob = await response.blob();
+      if (frameBlob.size === 0) throw new Error('Captured Pi frame was empty.');
+      const frameDataUrl = await blobToDataUrl(frameBlob);
+      addBatchImage({ url: frameDataUrl, source: 'pi', rawCaptureDataUrl: frameDataUrl });
+      setError(null);
+    } catch (captureError) {
+      setError(captureError instanceof Error ? captureError.message : 'Capture image failed.');
     }
   };
 
-  const deleteImage = (id: string, e?: React.MouseEvent) => {
-     if (e) e.stopPropagation();
-     if(window.confirm("Throw this sample into garbage?")) {
-        setDeletingIds(prev => new Set(prev).add(id));
-        setTimeout(() => {
-          setCapturedImages(prev => prev.filter(img => img.id !== id));
-          setDeletingIds(prev => {
-            const next = new Set(prev);
-            next.delete(id);
-            return next;
-          });
-        }, 400);
-     }
-  };
-  
-  const deleteSelectedImages = () => {
-    const selected = capturedImages.filter(img => img.selected);
-    if (selected.length === 0) return;
-    
-    if(window.confirm(`Throw ${selected.length} selected samples into garbage?`)) {
-      const idsToDelete = new Set(selected.map(img => img.id));
-      setDeletingIds(prev => new Set([...prev, ...idsToDelete]));
-      
-      setTimeout(() => {
-        setCapturedImages(prev => prev.filter(img => !idsToDelete.has(img.id)));
-        setDeletingIds(prev => {
-          const next = new Set(prev);
-          idsToDelete.forEach(id => next.delete(id));
-          return next;
-        });
-      }, 400);
-    }
+  const openGallery = () => { galleryInputRef.current?.click(); };
+
+  const handleGallerySelection = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const fileList = event.target.files;
+    if (!fileList) return;
+    const files: File[] = Array.from(fileList as FileList);
+    event.target.value = '';
+    if (files.length === 0) return;
+
+    const createdAt = Date.now();
+    const reservedNames: string[] = [];
+    const baseNames = [...existingSampleNames, ...batchImages.map((item) => item.name)];
+    const galleryItems: BatchImage[] = files.map((file) => {
+      const id = createId();
+      const name = generateNextSampleName([...baseNames, ...reservedNames]);
+      reservedNames.push(name);
+      return { id, name, url: URL.createObjectURL(file), source: 'gallery', selected: true, file };
+    });
+    const newIds = galleryItems.map((item) => item.id);
+    setEnteringIds((prev) => new Set([...prev, ...newIds]));
+    setBatchImages((prev) => [...prev, ...galleryItems]);
+    setError(null);
+    window.setTimeout(() => {
+      setEnteringIds((prev) => {
+        const next = new Set(prev);
+        newIds.forEach((id) => next.delete(id));
+        return next;
+      });
+    }, Math.max(40, Math.min(260, Date.now() - createdAt + 40)));
   };
 
-  const clearAllImages = () => {
-    if (capturedImages.length === 0) return;
-    if(window.confirm("Empty the entire gallery and throw ALL samples into garbage?")) {
-      const allIds = capturedImages.map(img => img.id);
-      setDeletingIds(new Set(allIds));
-      
-      setTimeout(() => {
-        setCapturedImages([]);
-        setDeletingIds(new Set());
-        setViewMode('camera');
-      }, 500);
-    }
-  };
+  // ─── Analysis ────────────────────────────────────────────────────────────
 
-  const selectAll = (select: boolean) => {
-    setCapturedImages(prev => prev.map(img => ({ ...img, selected: select })));
-  };
-
-  const handleBatchAnalyze = async (analyzeAll: boolean) => {
-    const imagesToProcess = analyzeAll 
-      ? capturedImages 
-      : capturedImages.filter(img => img.selected);
-
-    if (imagesToProcess.length === 0) return;
+  const runAnalysis = async (analyzeSelectedOnly: boolean) => {
+    const targets = analyzeSelectedOnly ? batchImages.filter((item) => item.selected) : batchImages;
+    if (targets.length === 0 || isAnalyzing) return;
 
     setIsAnalyzing(true);
+    setError(null);
     try {
-      const promises = imagesToProcess.map(img => analyzeImageWithPi(img.url));
-      const results = await Promise.all(promises);
+      const results = await Promise.all(
+        targets.map(async (item) => analyzeImageWithPi(await resolveAnalysisPayload(item), { imageName: item.name })),
+      );
       onAnalysisComplete(results);
-    } catch (err) {
-      setError("Connection to Raspberry Pi failed during batch analysis.");
+    } catch (analysisError) {
+      setError(analysisError instanceof Error ? analysisError.message : 'Batch analysis failed.');
+    } finally {
       setIsAnalyzing(false);
     }
   };
 
-  const openCropModal = (img: CapturedImage, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setCropTarget(img);
-  };
+  // ─── LIGHTBOX ─────────────────────────────────────────────────────────────
 
-  const handleCropConfirm = (id: string, newUrl: string) => {
-    setCapturedImages(prev => prev.map(img => 
-      img.id === id ? { ...img, url: newUrl } : img
-    ));
-    setCropTarget(null);
-  };
-
-  if (viewMode === 'camera') {
+  const renderLightbox = () => {
+    if (!lightboxItem) return null;
     return (
-      <div className="max-w-2xl mx-auto p-4 animate-in fade-in duration-300 flex flex-col h-[calc(100vh-5rem)]">
-        <div className="flex items-center justify-between mb-4">
-           <div className="flex items-center">
-              <button onClick={onBack} className="p-2 mr-2 text-slate-500 hover:bg-slate-200 rounded-full transition-colors">
-                <ArrowLeft size={24} />
-              </button>
-              <h2 className="text-xl font-bold text-slate-800">Sample Acquisition</h2>
-           </div>
-           {capturedImages.length > 0 && (
-             <div className="bg-emerald-100 text-emerald-800 text-xs font-bold px-4 py-1.5 rounded-full shadow-sm border border-emerald-200">
-               {capturedImages.length} Samples Ready
-             </div>
-           )}
-        </div>
+      <div
+        className="fixed inset-0 z-[300] flex flex-col bg-slate-950/95 backdrop-blur-sm"
+        onKeyDown={(e) => { if (e.key === 'Escape') closeLightbox(); }}
+      >
+        {/* Top bar */}
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-white/10 bg-slate-900/80 px-4 py-3">
+          <p className="truncate text-sm font-bold text-white">{lightboxItem.name}</p>
 
-        <div className="flex-1 bg-black rounded-3xl overflow-hidden shadow-2xl relative flex flex-col justify-center border-4 border-slate-200">
-          <canvas ref={canvasRef} className="hidden" />
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={zoomOut}
+              disabled={lightboxZoom <= 1}
+              title="Zoom out"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-xl text-slate-300 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-30"
+            >
+              <ZoomOut size={18} />
+            </button>
 
-          {error ? (
-            <div className="text-center p-10 text-white">
-              <div className="bg-yellow-500/10 p-6 rounded-full inline-block mb-4">
-                <AlertTriangle className="h-12 w-12 text-yellow-500" />
-              </div>
-              <p className="text-lg font-medium">{error}</p>
-              <button onClick={startCamera} className="mt-6 px-6 py-2 bg-emerald-600 text-white rounded-full font-bold hover:bg-emerald-700 transition-all">
-                Retry Connection
-              </button>
-            </div>
-          ) : (
-            <video
-              ref={videoRef}
-              autoPlay
-              playsInline
-              muted
-              className="w-full h-full object-cover"
-            />
-          )}
-          
-          <div className="absolute inset-0 pointer-events-none border border-white/10 grid grid-cols-3 grid-rows-3 opacity-20">
-            <div className="border border-white/20"></div><div className="border border-white/20"></div><div className="border border-white/20"></div>
-            <div className="border border-white/20"></div><div className="border border-white/20"></div><div className="border border-white/20"></div>
-            <div className="border border-white/20"></div><div className="border border-white/20"></div><div className="border border-white/20"></div>
+            <span className="min-w-[3rem] text-center text-xs font-black text-slate-300">
+              {Math.round(lightboxZoom * 100)}%
+            </span>
+
+            <button
+              type="button"
+              onClick={zoomIn}
+              disabled={lightboxZoom >= 4}
+              title="Zoom in"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-xl text-slate-300 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-30"
+            >
+              <ZoomIn size={18} />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setLightboxZoom(1)}
+              disabled={lightboxZoom === 1}
+              className="ml-1 rounded-xl border border-white/15 px-3 py-1.5 text-[11px] font-bold text-slate-300 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-30"
+            >
+              Reset
+            </button>
+
+            <button
+              type="button"
+              onClick={closeLightbox}
+              title="Close (Esc)"
+              className="ml-2 inline-flex h-9 w-9 items-center justify-center rounded-xl bg-white/10 text-white transition hover:bg-rose-500"
+            >
+              <X size={18} />
+            </button>
           </div>
         </div>
 
-        <div className="mt-8 flex justify-between items-center px-6 pb-6">
-           <div className="w-24 flex justify-start">
-             {capturedImages.length > 0 && (
-               <button 
-                 onClick={() => setViewMode('review')}
-                 className="flex flex-col items-center gap-1 group"
-               >
-                 <div className="relative">
-                    <img src={capturedImages[capturedImages.length-1].url} className="w-14 h-14 rounded-2xl border-2 border-white shadow-xl object-cover group-hover:scale-105 transition-transform" alt="last" />
-                    <span className="absolute -top-2 -right-2 bg-red-500 text-white text-[10px] w-6 h-6 flex items-center justify-center rounded-full font-bold border-2 border-white shadow-md animate-in zoom-in">
-                      {capturedImages.length}
-                    </span>
-                 </div>
-                 <span className="text-[10px] font-bold text-slate-500 uppercase tracking-tighter">Review</span>
-               </button>
-             )}
-           </div>
-
-           <div className="relative">
-              <button
-                onClick={capturePhoto}
-                className="h-20 w-20 p-1.5 bg-white border-4 border-slate-200 rounded-full flex items-center justify-center shadow-2xl hover:border-emerald-500 active:scale-90 transition-all"
-                aria-label="Capture Sample"
-              >
-                <div className="h-full w-full bg-emerald-500 rounded-full border-4 border-white shadow-inner"></div>
-              </button>
-              <div className="absolute -bottom-8 left-1/2 -translate-x-1/2 whitespace-nowrap text-[10px] font-bold text-slate-400 uppercase tracking-widest">Capture</div>
-           </div>
-
-           <div className="w-24 flex justify-end">
-              {capturedImages.length > 0 && (
-                <button 
-                  onClick={() => setViewMode('review')}
-                  className="p-4 bg-emerald-600 text-white rounded-2xl shadow-xl hover:bg-emerald-700 hover:shadow-emerald-500/20 active:scale-95 transition-all"
-                >
-                  <CheckCircle size={28} />
-                </button>
-              )}
-           </div>
+        {/* Scrollable image area */}
+        <div className="flex-1 overflow-auto p-4">
+          <img
+            src={lightboxItem.url}
+            alt={lightboxItem.name}
+            style={{ transform: `scale(${lightboxZoom})`, transformOrigin: 'top left' }}
+            className="block h-auto max-w-full transition-transform duration-150"
+            draggable={false}
+          />
         </div>
       </div>
     );
-  }
+  };
 
-  const selectedCount = capturedImages.filter(i => i.selected).length;
-  const isDeletingSomething = deletingIds.size > 0;
+  // ─── STEP 1: CAPTURE ──────────────────────────────────────────────────────
+
+  const renderCaptureStep = () => (
+    <section className="mx-auto w-full max-w-4xl p-4 pb-10 sm:p-6">
+      <div className="mb-5 flex items-center gap-3">
+        <button onClick={onBack} className="rounded-xl p-2 text-slate-500 transition hover:bg-slate-200">
+          <ArrowLeft size={20} />
+        </button>
+        <div className="flex-1">
+          <div className="flex items-center gap-2">
+            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-600 text-[11px] font-black text-white">1</span>
+            <h2 className="text-xl font-black tracking-tight text-slate-800">Capture Samples</h2>
+          </div>
+          <p className="mt-0.5 text-xs font-medium text-slate-500">Add images from the Pi camera or your device. Then proceed to review.</p>
+        </div>
+        <div className="hidden items-center gap-2 sm:flex">
+          <span className="rounded-full bg-emerald-600 px-3 py-1 text-[11px] font-black text-white">Step 1 of 2</span>
+          <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-bold text-slate-400">Step 2 of 2</span>
+        </div>
+      </div>
+
+      {/* Source toggle */}
+      <div className="mb-4 grid grid-cols-2 gap-2 rounded-2xl border border-slate-200 bg-slate-100 p-1">
+        <button
+          type="button"
+          onClick={() => setSourceMode('pi')}
+          className={`inline-flex items-center justify-center gap-2 rounded-xl px-2 py-2 text-xs font-bold transition sm:text-sm ${
+            sourceMode === 'pi' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:bg-white/70'
+          }`}
+        >
+          <Microscope size={15} />
+          Live Camera
+        </button>
+        <button
+          type="button"
+          onClick={() => setSourceMode('gallery')}
+          className={`inline-flex items-center justify-center gap-2 rounded-xl px-2 py-2 text-xs font-bold transition sm:text-sm ${
+            sourceMode === 'gallery' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:bg-white/70'
+          }`}
+        >
+          <Upload size={15} />
+          Upload Photos
+        </button>
+      </div>
+
+      {/* Source panel */}
+      {sourceMode === 'pi' ? (
+        <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="mb-3 rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-xs font-semibold text-emerald-800">
+            Connected to Raspberry Pi live feed: `{PI_CAMERA_STREAM_URL}`
+          </div>
+          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-black">
+            <img
+              src={PI_CAMERA_STREAM_URL}
+              alt="Raspberry Pi live microscope stream"
+              onError={() => setPiStreamError(true)}
+              onLoad={() => setPiStreamError(false)}
+              className="h-[44vh] min-h-[240px] w-full object-cover"
+            />
+          </div>
+          {piStreamError && (
+            <p className="mt-2 text-xs text-rose-600">Unable to load MJPEG stream from `{PI_CAMERA_STREAM_URL}`.</p>
+          )}
+          <button
+            type="button"
+            onClick={() => { void captureFromPiStream(); }}
+            className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-5 py-3 text-sm font-bold text-white transition hover:bg-emerald-700 active:scale-[0.99]"
+          >
+            <Microscope size={18} />
+            Capture Frame
+          </button>
+        </div>
+      ) : (
+        <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div
+            onClick={openGallery}
+            className="flex h-[44vh] min-h-[240px] cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center transition hover:border-emerald-400 hover:bg-emerald-50"
+          >
+            <Images size={44} className="mb-3 text-slate-400" />
+            <p className="text-base font-bold text-slate-800">Click to Upload Images</p>
+            <p className="mt-1 text-sm text-slate-500">JPG, PNG — multiple files supported</p>
+          </div>
+          <button
+            type="button"
+            onClick={openGallery}
+            className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-800 px-5 py-3 text-sm font-bold text-white transition hover:bg-slate-700 active:scale-[0.99]"
+          >
+            <Upload size={18} />
+            Select Images
+          </button>
+        </div>
+      )}
+
+      {error && (
+        <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">
+          {error}
+        </div>
+      )}
+
+      {/* Staged thumbnails — images are clickable for lightbox */}
+      {batchImages.length > 0 && (
+        <div className="mt-5 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="mb-3 flex items-center justify-between">
+            <p className="text-sm font-bold text-slate-800">
+              Staged Samples
+              <span className="ml-2 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-black text-emerald-700">
+                {batchImages.length}
+              </span>
+            </p>
+            <button
+              onClick={() => {
+                const ids = batchImages.map((item) => item.id);
+                setDeletingIds(new Set(ids));
+                window.setTimeout(() => { setBatchImages([]); setDeletingIds(new Set()); }, 260);
+              }}
+              className="text-xs font-bold text-rose-600 hover:underline"
+            >
+              Clear All
+            </button>
+          </div>
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {batchImages.map((item) => (
+              <div
+                key={item.id}
+                className={`relative flex-none overflow-hidden rounded-xl border border-slate-200 transition-all duration-300 ${
+                  deletingIds.has(item.id) ? 'scale-90 opacity-0' : enteringIds.has(item.id) ? 'scale-95 opacity-0' : 'scale-100 opacity-100'
+                }`}
+              >
+                {/* Click image → lightbox */}
+                <button
+                  type="button"
+                  onClick={() => openLightbox({ url: item.url, name: item.name })}
+                  className="group relative block"
+                  title="Click to enlarge"
+                >
+                  <img src={item.url} alt={item.name} className="h-20 w-20 object-cover" />
+                  <span className="absolute inset-0 flex items-center justify-center bg-slate-900/0 transition group-hover:bg-slate-900/30">
+                    <ZoomIn size={18} className="text-white opacity-0 drop-shadow transition group-hover:opacity-100" />
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => deleteImageWithAnimation(item.id)}
+                  className="absolute right-1 top-1 rounded-full bg-slate-900/70 p-1 text-white transition hover:bg-rose-600"
+                >
+                  <Trash2 size={11} />
+                </button>
+                <p className="truncate bg-white px-1.5 py-1 text-[10px] font-bold text-slate-700">{item.name}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Proceed CTA */}
+      <div className="mt-6">
+        <button
+          type="button"
+          disabled={batchImages.length === 0}
+          onClick={() => { setError(null); setStep('review'); }}
+          className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-5 py-4 text-sm font-bold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          Review {batchImages.length > 0 ? `${batchImages.length} Sample${batchImages.length === 1 ? '' : 's'}` : 'Samples'} Before Analysis
+          <ArrowRight size={18} />
+        </button>
+        {batchImages.length === 0 && (
+          <p className="mt-2 text-center text-xs text-slate-400">Capture or upload at least one image to continue.</p>
+        )}
+      </div>
+    </section>
+  );
+
+  // ─── STEP 2: REVIEW ───────────────────────────────────────────────────────
+
+  const renderReviewStep = () => (
+    <section className="mx-auto w-full max-w-6xl p-4 pb-32 sm:p-6">
+      <div className="mb-6 flex items-center gap-3">
+        <button
+          onClick={() => { setError(null); setStep('capture'); }}
+          className="rounded-xl p-2 text-slate-500 transition hover:bg-slate-200"
+        >
+          <ArrowLeft size={20} />
+        </button>
+        <div className="flex-1">
+          <div className="flex items-center gap-2">
+            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-slate-300 text-[11px] font-black text-white">1</span>
+            <span className="text-xs font-bold text-slate-400">Capture</span>
+            <ArrowRight size={13} className="text-slate-300" />
+            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-600 text-[11px] font-black text-white">2</span>
+            <h2 className="text-xl font-black tracking-tight text-slate-800">Review & Analyse</h2>
+          </div>
+          <p className="mt-0.5 text-xs font-medium text-slate-500">
+            Click any image to enlarge. Toggle selection, then run analysis.
+          </p>
+        </div>
+        <div className="hidden items-center gap-2 sm:flex">
+          <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-bold text-slate-400">Step 1 of 2</span>
+          <span className="rounded-full bg-emerald-600 px-3 py-1 text-[11px] font-black text-white">Step 2 of 2</span>
+        </div>
+      </div>
+
+      {/* Summary bar */}
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+        <div className="flex items-center gap-3">
+          <FlaskConical size={18} className="text-emerald-600" />
+          <span className="text-sm font-bold text-slate-800">
+            {batchImages.length} sample{batchImages.length === 1 ? '' : 's'} ready
+          </span>
+          <span className="text-xs text-slate-500">·</span>
+          <span className="text-xs font-semibold text-slate-500">{selectedCount} selected for analysis</span>
+        </div>
+        <div className="flex gap-2 text-xs">
+          <button onClick={() => setAllSelections(true)} className="rounded-lg bg-emerald-50 px-3 py-1.5 font-bold text-emerald-700 transition hover:bg-emerald-100">
+            Select All
+          </button>
+          <button onClick={() => setAllSelections(false)} className="rounded-lg bg-slate-100 px-3 py-1.5 font-bold text-slate-600 transition hover:bg-slate-200">
+            Deselect All
+          </button>
+        </div>
+      </div>
+
+      {/* Sample grid — image click → lightbox, footer → selection toggle */}
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+        {batchImages.map((item) => (
+          <article
+            key={item.id}
+            className={`overflow-hidden rounded-2xl border bg-white shadow-sm transition-all duration-300 ${
+              deletingIds.has(item.id) ? 'translate-y-3 scale-90 opacity-0'
+                : enteringIds.has(item.id) ? 'translate-y-2 scale-95 opacity-0'
+                : 'translate-y-0 scale-100 opacity-100'
+            } ${item.selected ? 'border-emerald-400 ring-2 ring-emerald-100' : 'border-slate-200'}`}
+          >
+            {/* Image — click opens lightbox */}
+            <button
+              type="button"
+              onClick={() => openLightbox({ url: item.url, name: item.name })}
+              className="group relative block w-full text-left"
+              title="Click to enlarge"
+            >
+              <img
+                src={item.url}
+                alt={item.name}
+                className={`h-36 w-full object-cover sm:h-40 transition-opacity ${item.selected ? 'opacity-100' : 'opacity-50'}`}
+              />
+              {/* Zoom hint on hover */}
+              <span className="absolute inset-0 flex items-center justify-center bg-slate-900/0 transition group-hover:bg-slate-900/25">
+                <ZoomIn size={26} className="text-white opacity-0 drop-shadow-lg transition group-hover:opacity-100" />
+              </span>
+              {/* Selected badge */}
+              <span className={`absolute left-2 top-2 rounded-full px-2 py-0.5 text-[10px] font-black ${item.selected ? 'bg-emerald-500 text-white' : 'bg-white/90 text-slate-500'}`}>
+                {item.selected ? 'Selected' : 'Skipped'}
+              </span>
+            </button>
+
+            {/* Card footer — toggle + source + delete */}
+            <div className="flex items-center justify-between gap-2 px-2 py-2">
+              <button
+                type="button"
+                onClick={() => toggleSelection(item.id)}
+                className={`flex-1 rounded-lg px-2 py-1.5 text-[11px] font-bold transition ${
+                  item.selected
+                    ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                    : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                }`}
+              >
+                {item.selected ? '✓ Selected' : 'Include'}
+              </button>
+              <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${item.source === 'pi' ? 'bg-emerald-50 text-emerald-700' : 'bg-blue-50 text-blue-700'}`}>
+                {item.source === 'pi' ? 'Pi' : 'Upload'}
+              </span>
+              <button
+                type="button"
+                onClick={() => deleteImageWithAnimation(item.id)}
+                className="shrink-0 rounded-lg p-1.5 text-rose-500 transition hover:bg-rose-50"
+                title="Remove from batch"
+              >
+                <Trash2 size={14} />
+              </button>
+            </div>
+          </article>
+        ))}
+      </div>
+
+      {error && (
+        <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">{error}</div>
+      )}
+
+      {/* Sticky analyse bar */}
+      <div
+        className="fixed bottom-0 left-0 right-0 border-t border-slate-200 bg-white/95 p-4 shadow-[0_-10px_24px_-16px_rgba(0,0,0,0.35)] backdrop-blur"
+        style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 1rem)' }}
+      >
+        <div className="mx-auto flex w-full max-w-6xl flex-col gap-2 sm:flex-row">
+          <button
+            type="button"
+            onClick={() => { void runAnalysis(true); }}
+            disabled={selectedCount === 0 || isAnalyzing}
+            className="inline-flex flex-1 items-center justify-center gap-2 rounded-2xl bg-slate-800 px-4 py-3 text-sm font-bold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <FlaskConical size={16} />
+            Analyse Selected ({selectedCount})
+          </button>
+          <button
+            type="button"
+            onClick={() => { void runAnalysis(false); }}
+            disabled={batchImages.length === 0 || isAnalyzing}
+            className="inline-flex flex-1 items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <CheckCircle2 size={16} />
+            Analyse All ({batchImages.length})
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+
+  // ─── ROOT ─────────────────────────────────────────────────────────────────
 
   return (
-    <div className="max-w-4xl mx-auto p-4 animate-in fade-in slide-in-from-bottom-4 duration-300 min-h-screen flex flex-col">
-       {cropTarget && (
-         <CropModal 
-           image={cropTarget} 
-           onConfirm={handleCropConfirm} 
-           onCancel={() => setCropTarget(null)} 
-         />
-       )}
+    <>
+      <input
+        ref={galleryInputRef}
+        type="file"
+        accept="image/*"
+        multiple
+        className="hidden"
+        onChange={(event) => { void handleGallerySelection(event); }}
+      />
 
-       {viewerTarget && (
-         <div className="fixed inset-0 z-[250] bg-black/90 flex items-center justify-center p-4">
-           <div className="w-full max-w-3xl bg-black rounded-lg overflow-hidden">
-             <div className="p-3 flex justify-between items-center">
-               <div className="text-white font-bold">Sample Viewer</div>
-               <div className="flex gap-2">
-                 <button onClick={() => downloadImage(viewerTarget.url, `sample-${viewerTarget.id}.jpg`)} className="text-white p-2 hover:text-emerald-400">
-                   <Download />
-                 </button>
-                 <button onClick={() => { closeViewer(); }} className="text-white p-2 hover:text-slate-300">Close</button>
-               </div>
-             </div>
-             <div className="p-4 flex items-center justify-center">
-               <img src={viewerTarget.url} alt="viewer" className="max-h-[80vh] max-w-full object-contain" />
-             </div>
-           </div>
-         </div>
-       )}
+      {step === 'capture' ? renderCaptureStep() : renderReviewStep()}
 
-       <div className="flex items-center justify-between mb-8">
-          <button onClick={() => setViewMode('camera')} className="flex items-center text-slate-500 hover:text-slate-800 font-bold text-sm transition-colors group">
-             <ArrowLeft size={18} className="mr-2 group-hover:-translate-x-1 transition-transform" />
-             Return to Camera
-          </button>
-          <h2 className="text-2xl font-black text-slate-800 tracking-tight">Sample Gallery</h2>
-          <div className="w-20"></div> 
-       </div>
+      {/* Lightbox — rendered above everything */}
+      {renderLightbox()}
 
-       {isAnalyzing && (
-          <div className="fixed inset-0 bg-slate-900/95 z-[200] flex flex-col items-center justify-center text-white backdrop-blur-md animate-in fade-in duration-300">
-            <div className="relative">
-              <RefreshCw className="h-16 w-16 animate-spin text-emerald-400 mb-6" />
-              <Zap className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-emerald-400/50 h-6 w-6" />
-            </div>
-            <h3 className="text-2xl font-bold mb-2">Analyzing Bacteria Samples</h3>
-            <p className="text-slate-400 font-medium">Connecting to ALLEGRI Raspberry Pi Cluster...</p>
-          </div>
-       )}
-
-       <div className="flex-1 overflow-y-auto mb-24 px-1">
-          <div className="flex justify-between items-center mb-6 bg-white p-4 rounded-2xl shadow-sm border border-slate-100 sticky top-0 z-10 flex-wrap gap-4">
-             <div className="flex gap-4">
-                <button onClick={() => selectAll(true)} className="text-xs font-bold text-emerald-600 hover:text-emerald-700 bg-emerald-50 px-3 py-1.5 rounded-lg transition-colors">Select All</button>
-                <button onClick={() => selectAll(false)} className="text-xs font-bold text-slate-500 hover:text-slate-600 bg-slate-50 px-3 py-1.5 rounded-lg transition-colors">Deselect All</button>
-             </div>
-             
-             <div className="flex items-center gap-4">
-               <span className="text-sm text-slate-600 font-bold bg-slate-100 px-3 py-1.5 rounded-lg">{selectedCount} Selected</span>
-               <div className="flex gap-2">
-                 {selectedCount > 0 && (
-                   <button 
-                     onClick={deleteSelectedImages} 
-                     className="flex items-center gap-2 text-xs font-bold text-red-600 bg-red-50 hover:bg-red-100 px-4 py-2 rounded-xl border border-red-100 transition-all active:scale-95 group"
-                   >
-                     <Trash2 size={14} className={isDeletingSomething ? "animate-bounce" : ""} />
-                     Throw to Garbage
-                   </button>
-                 )}
-                 {capturedImages.length > 0 && (
-                   <button 
-                     onClick={clearAllImages} 
-                     className="flex items-center gap-2 text-xs font-bold text-slate-500 bg-slate-100 hover:bg-slate-200 px-4 py-2 rounded-xl border border-slate-200 transition-all active:scale-95"
-                   >
-                     <X size={14} />
-                     Empty Gallery
-                   </button>
-                 )}
-               </div>
-             </div>
-          </div>
-
-          {capturedImages.length === 0 ? (
-            <div className="text-center py-32 bg-slate-50 rounded-3xl border-2 border-dashed border-slate-200">
-               <div className="bg-slate-100 p-8 rounded-full inline-block mb-6">
-                 <Images size={64} className="text-slate-300" />
-               </div>
-               <h3 className="text-xl font-bold text-slate-700">Gallery Empty</h3>
-               <p className="text-slate-400 mt-2 max-w-xs mx-auto">Take some photos of the samples to begin medical analysis.</p>
-               <button onClick={() => setViewMode('camera')} className="mt-8 px-8 py-3 bg-emerald-600 text-white rounded-2xl font-bold shadow-lg shadow-emerald-500/20 hover:bg-emerald-700 transition-all">Launch Camera</button>
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-               {capturedImages.map((img) => (
-                 <div 
-                   key={img.id} 
-                   className={`relative aspect-square rounded-2xl overflow-hidden border-2 cursor-pointer transition-all duration-300 group ${
-                     deletingIds.has(img.id) ? 'scale-0 rotate-12 opacity-0' : 'scale-100 rotate-0 opacity-100'
-                   } ${img.selected ? 'border-emerald-500 ring-4 ring-emerald-500/10' : 'border-slate-100 hover:border-slate-300'}`}
-                   onClick={() => toggleImageSelection(img.id)}
-                 >
-                    <img src={img.url} className="w-full h-full object-cover transition-transform group-hover:scale-105 duration-500" alt="sample" />
-                    
-                    <div className={`absolute top-3 right-3 h-7 w-7 rounded-full flex items-center justify-center transition-all z-20 shadow-md ${img.selected ? 'bg-emerald-500 text-white' : 'bg-black/20 text-white border border-white/50 backdrop-blur-sm'}`}>
-                       {img.selected ? <CheckCircle size={16} /> : <div className="h-4 w-4 rounded-full border-2 border-white/50" />}
-                    </div>
-
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-3 gap-2">
-                       <div className="flex justify-between items-center w-full">
-                         <div className="flex gap-2">
-                           <button 
-                             onClick={(e) => openCropModal(img, e)}
-                             className="bg-emerald-500/20 hover:bg-emerald-500 text-white p-2 rounded-xl backdrop-blur-md transition-all border border-emerald-400/30"
-                             title="Crop Image"
-                           >
-                             <Crop size={18} />
-                           </button>
-                           <button 
-                             onClick={(e) => toggleCorrection(img.id)}
-                             className={`bg-indigo-500/10 hover:bg-indigo-500 text-white p-2 rounded-xl backdrop-blur-md transition-all border ${correctingIds.has(img.id) ? 'border-indigo-400 bg-indigo-500 text-white' : 'border-indigo-200'}`}
-                             title="Toggle Correction"
-                           >
-                             <Plus size={18} />
-                           </button>
-                           <button 
-                             onClick={() => downloadImage(img.url, `sample-${img.id}.jpg`)}
-                             className="bg-emerald-500/10 hover:bg-emerald-500 text-white p-2 rounded-xl backdrop-blur-md transition-all border border-emerald-300"
-                             title="Download Image"
-                           >
-                             <Download size={18} />
-                           </button>
-                           <button 
-                             onClick={(e) => deleteImage(img.id, e)}
-                             className="bg-red-500/20 hover:bg-red-500 text-white p-2 rounded-xl backdrop-blur-md transition-all border border-red-400/30"
-                             title="Throw into Garbage"
-                           >
-                             <Trash2 size={18} />
-                           </button>
-                         </div>
-                       </div>
-                    </div>
-                 </div>
-               ))}
-            </div>
-          )}
-       </div>
-
-       <div className="fixed bottom-0 left-0 right-0 bg-white/80 backdrop-blur-xl border-t border-slate-200 p-6 shadow-[0_-10px_30px_-5px_rgba(0,0,0,0.1)] z-40">
-          <div className="max-w-4xl mx-auto flex flex-col sm:flex-row gap-4">
-             <button
-               onClick={() => handleBatchAnalyze(false)}
-               disabled={selectedCount === 0 || isAnalyzing || isDeletingSomething}
-               className="flex-1 py-4 px-6 bg-slate-800 text-white rounded-2xl font-bold shadow-xl shadow-slate-900/10 hover:bg-slate-700 transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-3 active:scale-95"
-             >
-               <Zap size={20} className="text-emerald-400" />
-               Analyze Selected ({selectedCount})
-             </button>
-
-             <button
-               onClick={() => handleBatchAnalyze(true)}
-               disabled={capturedImages.length === 0 || isAnalyzing || isDeletingSomething}
-               className="flex-1 py-4 px-6 bg-emerald-600 text-white rounded-2xl font-bold shadow-xl shadow-emerald-500/20 hover:bg-emerald-700 transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-3 active:scale-95"
-             >
-               <Maximize2 size={20} />
-               Process Entire Gallery ({capturedImages.length})
-             </button>
-          </div>
-       </div>
-    </div>
+      {isAnalyzing && (
+        <div className="fixed inset-0 z-[200] flex flex-col items-center justify-center gap-3 bg-slate-900/85 text-white backdrop-blur-sm">
+          <LoaderCircle className="h-12 w-12 animate-spin text-emerald-300" />
+          <p className="text-lg font-bold">Running Medical AI Analysis...</p>
+          <p className="text-sm text-slate-300">Please wait while YOLO11 processes selected samples.</p>
+        </div>
+      )}
+    </>
   );
 };
 

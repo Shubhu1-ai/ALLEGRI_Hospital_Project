@@ -1,0 +1,21 @@
+{
+  "settings_version": "0.0.6",
+  "datasets_dir": "D:\\ALLEGRI121\\datasets",
+  "weights_dir": "D:\\ALLEGRI121\\allegri-hospital-project\\weights",
+  "runs_dir": "D:\\ALLEGRI121\\allegri-hospital-project\\runs",
+  "uuid": "12d74f4993beff9dc3f0ed978762f008ec37e65402109ca80a4840a8ecf9303d",
+  "sync": true,
+  "api_key": "",
+  "openai_api_key": "",
+  "clearml": true,
+  "comet": true,
+  "dvc": true,
+  "hub": true,
+  "mlflow": true,
+  "neptune": true,
+  "raytune": true,
+  "tensorboard": false,
+  "wandb": false,
+  "vscode_msg": true,
+  "openvino_msg": true
+}

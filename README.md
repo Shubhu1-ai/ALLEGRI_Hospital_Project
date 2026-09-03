@@ -1,123 +1,112 @@
-# Pi2_Project
+# Allegri Diagnostic Kiosk Frontend
 
-Short description
+A lightweight React/Vite **thin client** designed to interface with a Raspberry Pi Edge AI device. The Pi handles all heavy lifting: YOLO microscope image analysis, camera streaming, and SQLite database storage. This frontend is purely a display and control surface.
 
-This repository contains a frontend (Vite/React/TypeScript) and Python backend related to the Pi2_Project web app. Files of interest include `package.json`, `main.py`, and `server.py`.
+---
 
-Prerequisites
-- Node.js (16+)
-- Python 3.10+ (if you run the Python backend)
+## Architecture Notes
 
-Quick start (frontend)
-1. Install dependencies:
+> **Read this before touching anything.**
+
+### Kiosk Mode — No Authentication
+
+This app runs in **Kiosk Mode**. All Login, Authentication, and User Profile management features have been **intentionally removed**. There is no login screen. The app boots directly into the dashboard as a hardcoded device user (`KIOSK_USER`). Do not attempt to re-add auth — it is out of scope for this deployment.
+
+### No Local Webcam
+
+Local laptop/desktop webcam access has been **removed**. The app exclusively uses the **Raspberry Pi's camera** via an MJPEG stream. If you see no camera feed, the issue is network connectivity to the Pi — not a browser permissions problem.
+
+### localStorage — IP Address Only
+
+`localStorage` is used for **one purpose only**: persisting the Pi's dynamic IP address between page refreshes (key: `PI_IP`, default: `192.168.137.47`). All actual patient data is fetched live from the Pi's SQLite database via the backend API. Nothing medical is stored in the browser.
+
+### Backend Endpoints
+
+| Server | Default Base URL | Purpose |
+|---|---|---|
+| Pi API | `http://{PI_IP}:8000` | YOLO analysis, history, health check |
+| Pi Camera | `http://{PI_IP}:5000` | MJPEG live stream, frame capture |
+
+---
+
+## Getting Started
+
+**Prerequisites:** Node.js 18+ and npm installed on your machine.
+
+### 1. Install dependencies
 
 ```bash
 npm install
 ```
 
-2. Start the dev server:
+### 2. Start the development server
 
 ```bash
 npm run dev
 ```
 
-Quick start (backend)
-1. Install Python deps (if a requirements file exists):
-
-```bash
-python -m pip install -r requirements.txt
-```
-
-2. Run the backend (example):
-
-```bash
-python server.py
-```
-
-Notes
-- If any dataset or model files are large (e.g. `.pth` files), consider using Git LFS for them.
-- Update this README with project-specific run instructions and environment variables as needed.
-
-Repository
-
-https://github.com/Shubhu1-ai/Pi2_Project
-# ALLEGRI Hospital Portal - Setup & Deployment Guide
-
-This application is a specialized medical interface designed for the ALLEGRI Hospital unit. It allows technicians to capture samples via camera, perform cropping/refining, and interface with a Raspberry Pi analysis cluster for bacterial identification.
-
-## 🚀 How to get a Public Link (Deployment)
-
-To share this site with others, you need to "host" it. Since this is a React application, you can do this for free in about 2 minutes using **Vercel** or **Netlify**.
-
-### Option A: Vercel (Easiest)
-1.  **Create a GitHub Account**: If you don't have one, sign up at [github.com](https://github.com).
-2.  **Upload your Code**: Create a "New Repository" and upload all these project files.
-3.  **Link to Vercel**: Go to [vercel.com](https://vercel.com), sign in with GitHub, and click "Add New" > "Project".
-4.  **Import**: Select your repository. Vercel will automatically detect it's a React app.
-5.  **Deploy**: Click "Deploy". In a few seconds, you will receive a public link (e.g., `allegri-portal.vercel.app`) that you can send to anyone!
+Vite will print a local URL (typically `http://localhost:5173`). Open it in your browser.
 
 ---
 
-## 💻 Local VS Code Setup Guide
+## Connecting to the Raspberry Pi
 
-### 1. Prerequisites
-*   **Node.js**: Download and install from [nodejs.org](https://nodejs.org/).
-*   **VS Code**: Your primary code editor.
+The app needs to know where to find the Pi on your network. On first launch (or if the Pi's IP changes), do the following:
 
-### 2. Project Initialization
-1.  Open VS Code.
-2.  Open a new terminal (`Ctrl + ~` or `Cmd + ~`).
-3.  Run the following commands:
-    ```bash
-    npx create-react-app allegri-portal --template typescript
-    cd allegri-portal
-    npm install lucide-react
-    ```
+1. On the dashboard, click the **Network Settings** button (or the IP Configurator icon in the header).
+2. In the input box, paste **one** of the following:
+   - The Pi's **local IP address** — e.g., `192.168.137.47`
+     *(Use this when your laptop and Pi are on the same Wi-Fi or Ethernet network.)*
+   - A **Serveo or Pinggy tunnel URL** — e.g., `https://abc123.serveousercontent.com`
+     *(Use this for remote access when you are on different networks.)*
+3. Click **Save / Connect**. The page will reload and attempt to reach the Pi.
 
-### 3. Copying the Files
-1.  Delete everything inside the `src/` folder of your new project.
-2.  Create the folders: `src/components` and `src/services`.
-3.  Copy the code from this application into the corresponding files in your VS Code project.
-4.  Ensure `public/index.html` is updated with the Tailwind and Google Font links provided in the `index.html` file code.
+The **status indicator in the header** will turn green when the Pi is reachable (`/health` check). If it stays red, double-check the IP/URL and confirm the Pi's Flask servers are running on ports `8000` and `5000`.
 
-### 4. Running the App
-In your terminal, run:
-```bash
-npm start
+---
+
+## Project Structure
+
 ```
-The app will open at `http://localhost:3000`.
+allegri-hospital-project/
+├── App.tsx                     # Root component, view routing, state
+├── index.tsx                   # ReactDOM entry point
+├── types.ts                    # Shared TypeScript interfaces
+├── components/
+│   ├── CameraView.tsx          # Pi camera stream + batch capture workflow
+│   ├── DoctorOverrideModal.tsx # Edit/correct YOLO detection results
+│   ├── Header.tsx              # Logo, health status, Pi connectivity indicator
+│   ├── HistoryView.tsx         # View session-local analysis results
+│   ├── NetworkSettings.tsx     # Pi IP / tunnel URL configurator
+│   ├── PatientHistoryView.tsx  # Fetch & browse history from Pi database
+│   └── LoginForm.tsx           # [DEAD CODE — see below]
+├── services/
+│   ├── piConfig.ts             # Builds all API endpoint URLs from stored IP
+│   └── piService.ts            # All HTTP calls to the Pi backend
+└── utils/
+    └── sampleNaming.ts         # Auto-generates sample label names
+```
 
 ---
 
-## 🔬 System Functionality
+## Dead Code — Safe to Delete
 
-### 🔐 Authentication
-*   **Username**: `ALLEGRI`
-*   **Password**: `ALLEGRI@123`
-*   Features: Secure white input boxes, black text for visibility, and a password reveal toggle.
+The following file is **no longer used** anywhere in the application. It is a leftover from before the Kiosk Mode switch and can be safely deleted:
 
-### 📸 Sample Acquisition (Camera)
-*   Supports multiple captures at once.
-*   **Manual Crop**: After capturing, enter the "Review" mode to crop specific areas of the image for better analysis.
-*   **Batch Deletion**: Select multiple images and "Delete Selected" to clear them from memory.
-*   **Garbage Clearing**: Using "Clear Gallery" wipes all temporary images from the device memory.
+| File | Reason |
+|---|---|
+| `components/LoginForm.tsx` | Implements localStorage-based login/signup. Not imported or rendered anywhere. The app bypasses authentication entirely via the hardcoded `KIOSK_USER` in `App.tsx`. |
 
-### 🧬 Calculation & Results (History)
-*   **Filters**: Sort results by "Completed", "Pending", or "Failed".
-*   **Data Management**: Use checkboxes to delete specific records or use "Clear All Logs" to wipe the diagnostic history.
-*   **Status Indicators**: Color-coded badges with high-confidence progress bars.
-
-### 🛠 Troubleshooting & Help
-Accessed via the Profile icon in the top-right:
-1.  **Camera**: Ensure permissions are granted.
-2.  **Pi Connectivity**: Verify the Raspberry Pi unit is on the same network.
-3.  **Sign Out**: Clears all local session data for security.
+No `AuthContext` file was found — it appears to have already been removed in a prior cleanup. The `UserProfile` interface in `types.ts` is still valid (it types the `KIOSK_USER` constant) and should stay.
 
 ---
 
-## 📡 Raspberry Pi Integration
-To link your actual Raspberry Pi hardware:
-1.  Open `src/services/piService.ts`.
-2.  Locate the "REAL IMPLEMENTATION" section.
-3.  Enter your Pi's internal IP address (e.g., `192.168.x.x`).
-4.  The app will then send base64 image data to your Pi's Python/Flask API for processing.
+## Tech Stack
+
+| Tool | Version |
+|---|---|
+| React | 19 |
+| Vite | 6 |
+| TypeScript | 5 |
+| lucide-react | 0.556 (icons) |
+| Capacitor | 8 (Android packaging — not required for local dev) |

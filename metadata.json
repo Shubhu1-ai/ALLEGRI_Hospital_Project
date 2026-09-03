@@ -1,7 +1,0 @@
-{
-  "name": "ALLEGRI Hospital Portal",
-  "description": "A medical interface for capturing sample images and interfacing with Raspberry Pi analysis systems.",
-  "requestFramePermissions": [
-    "camera"
-  ]
-}
