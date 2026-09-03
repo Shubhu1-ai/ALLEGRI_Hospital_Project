@@ -2,7 +2,9 @@
 
 An AI-assisted diagnostic support system built with a real hospital partner (Centre Hospitalier de Saint-Denis / Delafontaine Hospital) as part of ESILV's Pi² industry-partnership program. It couples a low-cost microscope camera with a YOLOv11 model to detect bacteria (Gram stains) and malaria parasites (blood smears), paired with a web and Android app for hospital staff to review results in real time.
 
-🏆 **This project won a prize at ESILV** — see the [LinkedIn post](https://lnkd.in/p/eHwZRPXM)
+🏆 **This project won a prize at ESILV** — see the [LinkedIn post]([https://lnkd.in/p/eHwZRPXM](https://lnkd.in/p/eHwZRPXM))
+
+![Prize ceremony](./prize-photo.jpeg)
 
 ## The problem
 Bacterial and parasitic infections are among the leading causes of preventable death worldwide, and delayed antibiotic treatment is the single biggest factor. Identifying species from a Gram stain, or diagnosing malaria from a blood smear, normally requires an experienced biologist — who isn't always on-site during night shifts. ALLEGRI was built to give clinical staff real-time, AI-assisted support in exactly those moments.
@@ -41,7 +43,7 @@ From our project closure report, the key next steps identified were: enriching t
 
 ## Files in this repo
 - Project synopsis (original brief from the hospital partner)
-- Pi² Closure Report (full technical writeup: methodology, risk management, engineering standards, results)
+- [ALLEGRI Closure Report](./ALLEGRI_Closure_Report.pdf) — full technical writeup: methodology, risk management, engineering standards, results
 - `allegri-hospital-project/` — frontend app source code (see technical documentation below)
 
 ---
