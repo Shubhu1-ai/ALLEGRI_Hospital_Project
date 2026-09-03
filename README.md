@@ -1,3 +1,24 @@
+# ALLEGRI Hospital Project
+
+This repository contains the ALLEGRI Hospital Project: a mixed Node/React + Python project for hospital assistance and detection tools.
+
+Contents:
+- `allegri-hospital-project/` — main frontend app (Vite + React / TypeScript)
+- `detector.py` and other Python utilities for device-side processing
+
+Quick start (from repository root):
+
+```bash
+cd allegri-hospital-project
+npm install
+npm run dev
+```
+
+Notes:
+- Large data is excluded from the repo by `.gitignore` (folder `best/data/`).
+- If you'd like a different license or more CI steps (Python checks, tests), tell me and I will update.
+
+Maintainer: replace with your name
 # Allegri Diagnostic Kiosk Frontend
 
 A lightweight React/Vite **thin client** designed to interface with a Raspberry Pi Edge AI device. The Pi handles all heavy lifting: YOLO microscope image analysis, camera streaming, and SQLite database storage. This frontend is purely a display and control surface.
