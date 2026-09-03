@@ -2,7 +2,7 @@
 
 An AI-assisted diagnostic support system built with a real hospital partner (Centre Hospitalier de Saint-Denis / Delafontaine Hospital) as part of ESILV's Pi² industry-partnership program. It couples a low-cost microscope camera with a YOLOv11 model to detect bacteria (Gram stains) and malaria parasites (blood smears), paired with a web and Android app for hospital staff to review results in real time.
 
-🏆 **This project won a prize at ESILV** — see the [LinkedIn post]([https://lnkd.in/p/eHwZRPXM](https://lnkd.in/p/eHwZRPXM))
+🏆 **This project won a prize at ESILV** — see the [LinkedIn post]([https://lnkd.in/p/eHwZRPXM](https://lnkd.in/p/eHwZRPXM)
 
 ![Prize ceremony](./prize-photo.jpeg)
 
