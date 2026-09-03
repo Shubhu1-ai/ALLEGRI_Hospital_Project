@@ -4,7 +4,7 @@ An AI-assisted diagnostic support system built with a real hospital partner (Cen
 
 🏆 **This project won a prize at ESILV** — see the [LinkedIn post](https://lnkd.in/p/eHwZRPXM)
 
-<img src="./prize-photo.jpeg" alt="Prize ceremony" width="500">
+<img src="./prize-photo.jpeg" alt="Prize ceremony" style="width:300px; height:200px; object-fit:cover;">
 
 ## The problem
 Bacterial and parasitic infections are among the leading causes of preventable death worldwide, and delayed antibiotic treatment is the single biggest factor. Identifying species from a Gram stain, or diagnosing malaria from a blood smear, normally requires an experienced biologist — who isn't always on-site during night shifts. ALLEGRI was built to give clinical staff real-time, AI-assisted support in exactly those moments.
